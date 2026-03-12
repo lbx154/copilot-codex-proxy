@@ -1,0 +1,25 @@
+{
+  "name": "copilot-codex-proxy",
+  "version": "1.0.0",
+  "description": "Local proxy that lets OpenAI Codex CLI use GitHub Copilot's API (GPT-5.4, Claude, etc.)",
+  "type": "module",
+  "main": "proxy.mjs",
+  "bin": {
+    "copilot-codex-proxy": "./proxy.mjs"
+  },
+  "scripts": {
+    "start": "node proxy.mjs",
+    "setup": "node setup.mjs"
+  },
+  "keywords": [
+    "copilot",
+    "codex",
+    "proxy",
+    "openai",
+    "github"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
