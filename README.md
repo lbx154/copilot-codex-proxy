@@ -39,6 +39,7 @@ A local proxy that lets **OpenAI Codex CLI** use your **GitHub Copilot** subscri
 - **Node.js** >= 18
 - **GitHub Copilot** subscription (Individual, Business, or Enterprise)
 - **OpenAI Codex CLI** — install with `npm install -g @openai/codex`
+- **Supported platforms**: macOS, Linux, Windows
 
 ### Quick Start
 
@@ -60,7 +61,11 @@ codex
 Or use the all-in-one helper:
 
 ```bash
+# Linux / macOS
 ./start-codex.sh
+
+# Windows
+start-codex.bat
 ```
 
 ### How It Works
@@ -168,6 +173,7 @@ MIT
 - **Node.js** >= 18
 - **GitHub Copilot** 订阅（个人版、商业版或企业版）
 - **OpenAI Codex CLI** —— 通过 `npm install -g @openai/codex` 安装
+- **支持平台**：macOS、Linux、Windows
 
 ### 快速开始
 
@@ -189,7 +195,11 @@ codex
 或者使用一键启动脚本：
 
 ```bash
+# Linux / macOS
 ./start-codex.sh
+
+# Windows
+start-codex.bat
 ```
 
 ### 工作原理
