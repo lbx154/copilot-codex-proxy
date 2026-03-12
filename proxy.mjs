@@ -21,11 +21,13 @@ import http from "node:http";
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 
+const HOME = os.homedir();
 const VSCODE_CLIENT_ID = "01ab8ac9400c4e429b23";
-const VSCODE_TOKEN_PATH = path.join(process.env.HOME, ".copilot-proxy", "vscode-token.json");
-const COPILOT_CONFIG_PATH = path.join(process.env.HOME, ".copilot", "config.json");
+const VSCODE_TOKEN_PATH = path.join(HOME, ".copilot-proxy", "vscode-token.json");
+const COPILOT_CONFIG_PATH = path.join(HOME, ".copilot", "config.json");
 
 // ---------------------------------------------------------------------------
 // Token management: OAuth token → session token

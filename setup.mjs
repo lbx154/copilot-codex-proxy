@@ -11,13 +11,14 @@
 import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import readline from "node:readline";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CLIENT_ID = "01ab8ac9400c4e429b23";
 const SCOPE = "user:email";
-const TOKEN_DIR = path.join(process.env.HOME, ".copilot-proxy");
+const TOKEN_DIR = path.join(os.homedir(), ".copilot-proxy");
 const TOKEN_PATH = path.join(TOKEN_DIR, "vscode-token.json");
 
 // ── Color helpers ────────────────────────────────────────────────────────────
@@ -159,7 +160,9 @@ async function pollForToken(deviceCode, interval) {
 function saveToken(accessToken) {
   if (!fs.existsSync(TOKEN_DIR)) fs.mkdirSync(TOKEN_DIR, { recursive: true });
   fs.writeFileSync(TOKEN_PATH, JSON.stringify({ access_token: accessToken }, null, 2) + "\n");
-  fs.chmodSync(TOKEN_PATH, 0o600);
+  if (process.platform !== "win32") {
+    fs.chmodSync(TOKEN_PATH, 0o600);
+  }
 }
 
 // ── Step 4: Verify token ─────────────────────────────────────────────────────
