@@ -45,7 +45,7 @@ A local proxy that lets **OpenAI Codex CLI** use your **GitHub Copilot** subscri
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/user/copilot-codex-proxy.git
+git clone https://github.com/lbx154/copilot-codex-proxy.git
 cd copilot-codex-proxy
 
 # 2. Run interactive setup (GitHub OAuth device flow)
@@ -179,7 +179,7 @@ MIT
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/user/copilot-codex-proxy.git
+git clone https://github.com/lbx154/copilot-codex-proxy.git
 cd copilot-codex-proxy
 
 # 2. 运行交互式设置（GitHub OAuth 设备授权流程）
