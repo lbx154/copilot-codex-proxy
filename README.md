@@ -130,43 +130,53 @@ The proxy auto-detects model type and routes accordingly:
 npm install -g @anthropic-ai/claude-code
 ```
 
-**Step 2**: Start the proxy:
+**Step 2**: Edit `~/.claude/settings.json` (create it if it doesn't exist):
 
-```bash
-node proxy.mjs
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18080",
+    "ANTHROPIC_AUTH_TOKEN": "copilot-proxy-local"
+  },
+  "model": "claude-sonnet-4.6"
+}
 ```
 
-**Step 3**: Launch Claude Code with these environment variables:
+> **Note**: `ANTHROPIC_AUTH_TOKEN` can be any non-empty string. The proxy ignores it and uses GitHub Copilot authentication instead.
+
+**Step 3**: Start the proxy, then launch Claude Code:
+
+```bash
+# Terminal 1
+node proxy.mjs
+
+# Terminal 2
+claude
+```
+
+**Switching models** — edit `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18080",
+    "ANTHROPIC_AUTH_TOKEN": "copilot-proxy-local"
+  },
+  "model": "claude-sonnet-4.6"
+}
+```
+
+Available Claude models: `claude-sonnet-4.6`, `claude-opus-4.6`, `claude-haiku-4.5`
+
+> The proxy automatically normalizes model names: `claude-sonnet-4-6` → `claude-sonnet-4.6`, so both formats work.
+
+**Alternative**: You can also use environment variables directly:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:18080 \
-ANTHROPIC_API_KEY=copilot-proxy \
-claude
-```
-
-> **Note**: `ANTHROPIC_API_KEY` can be set to any non-empty string (e.g. `copilot-proxy`). The proxy ignores it and uses GitHub Copilot authentication instead.
-
-**Optional**: To avoid setting env vars every time, add them to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:18080
-export ANTHROPIC_API_KEY=copilot-proxy
-```
-
-Then simply run:
-
-```bash
-claude
-```
-
-**Specifying a model**: Claude Code uses `claude-sonnet-4-5` by default. To use a different model:
-
-```bash
+ANTHROPIC_AUTH_TOKEN=copilot-proxy-local \
 claude --model claude-sonnet-4.6
-claude --model claude-opus-4.6
 ```
-
-> The proxy automatically normalizes model names: `claude-sonnet-4-6` → `claude-sonnet-4.6`, so both formats work.
 
 ### How It Works
 
@@ -239,8 +249,8 @@ Remember to update `base_url` in Codex config and `ANTHROPIC_BASE_URL` for Claud
 | `Error: ECONNREFUSED 127.0.0.1:18080` | Proxy isn't running — start with `node proxy.mjs` |
 | `Copilot access could not be verified` | Make sure you have an active GitHub Copilot subscription |
 | Proxy starts but Codex hangs | Check `~/.codex/config.toml` has the correct `base_url` and `wire_api` |
-| Claude Code returns auth errors | Make sure `ANTHROPIC_BASE_URL` is set and `ANTHROPIC_API_KEY` is non-empty |
-| Claude Code model not found | Try `claude --model claude-sonnet-4.6` explicitly |
+| Claude Code returns auth errors | Check `~/.claude/settings.json` has correct `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` |
+| Claude Code model not found | Set `"model"` in `~/.claude/settings.json` or use `claude --model claude-sonnet-4.6` |
 | `Session token refresh failed` | Network issue — the proxy auto-retries every 15 min |
 
 **Logs**: Check `proxy.log` in the project directory, or watch the terminal where `node proxy.mjs` is running.
@@ -369,43 +379,53 @@ model = "gpt-4o"              # 旧版 GPT 模型（自动转换）
 npm install -g @anthropic-ai/claude-code
 ```
 
-**第二步**：启动代理：
+**第二步**：编辑 `~/.claude/settings.json`（如不存在则创建）：
 
-```bash
-node proxy.mjs
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18080",
+    "ANTHROPIC_AUTH_TOKEN": "copilot-proxy-local"
+  },
+  "model": "claude-sonnet-4.6"
+}
 ```
 
-**第三步**：通过环境变量启动 Claude Code：
+> **注意**：`ANTHROPIC_AUTH_TOKEN` 可以是任意非空字符串，代理会忽略它，使用 GitHub Copilot 认证。
+
+**第三步**：启动代理，然后启动 Claude Code：
+
+```bash
+# 终端 1
+node proxy.mjs
+
+# 终端 2
+claude
+```
+
+**切换模型** —— 编辑 `~/.claude/settings.json`：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18080",
+    "ANTHROPIC_AUTH_TOKEN": "copilot-proxy-local"
+  },
+  "model": "claude-sonnet-4.6"
+}
+```
+
+可用的 Claude 模型：`claude-sonnet-4.6`、`claude-opus-4.6`、`claude-haiku-4.5`
+
+> 代理会自动规范化模型名称：`claude-sonnet-4-6` → `claude-sonnet-4.6`，两种格式均可使用。
+
+**替代方式**：也可以直接使用环境变量：
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:18080 \
-ANTHROPIC_API_KEY=copilot-proxy \
-claude
-```
-
-> **注意**：`ANTHROPIC_API_KEY` 可以设置为任意非空字符串（如 `copilot-proxy`）。代理会忽略它，使用 GitHub Copilot 认证。
-
-**可选**：为避免每次都设置环境变量，可以将其添加到 shell 配置文件（`~/.bashrc`、`~/.zshrc` 等）：
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:18080
-export ANTHROPIC_API_KEY=copilot-proxy
-```
-
-之后直接运行即可：
-
-```bash
-claude
-```
-
-**指定模型**：Claude Code 默认使用 `claude-sonnet-4-5`，如需使用其他模型：
-
-```bash
+ANTHROPIC_AUTH_TOKEN=copilot-proxy-local \
 claude --model claude-sonnet-4.6
-claude --model claude-opus-4.6
 ```
-
-> 代理会自动规范化模型名称：`claude-sonnet-4-6` → `claude-sonnet-4.6`，两种格式均可使用。
 
 ### 工作原理
 
@@ -478,8 +498,8 @@ node proxy.mjs --port 9090
 | `Error: ECONNREFUSED 127.0.0.1:18080` | 代理未运行 —— 执行 `node proxy.mjs` 启动 |
 | `Copilot access could not be verified` | 确认你有有效的 GitHub Copilot 订阅 |
 | 代理启动但 Codex 无响应 | 检查 `~/.codex/config.toml` 中的 `base_url` 和 `wire_api` 是否正确 |
-| Claude Code 报认证错误 | 确认 `ANTHROPIC_BASE_URL` 已设置且 `ANTHROPIC_API_KEY` 非空 |
-| Claude Code 找不到模型 | 尝试显式指定 `claude --model claude-sonnet-4.6` |
+| Claude Code 报认证错误 | 检查 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 是否正确 |
+| Claude Code 找不到模型 | 在 `~/.claude/settings.json` 中设置 `"model"` 或使用 `claude --model claude-sonnet-4.6` |
 | `Session token refresh failed` | 网络问题 —— 代理每 15 分钟自动重试 |
 
 **日志**：查看项目目录中的 `proxy.log`，或查看运行 `node proxy.mjs` 的终端输出。
