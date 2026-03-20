@@ -519,7 +519,7 @@ function forwardResponsesPassthrough(body, res, fallbackFn) {
       upstream.on("data", (d) => errBody += d);
       upstream.on("end", () => {
         // If the model doesn't support Responses API, fall back to translation
-        if (errBody.includes("unsupported_api_for_model") && fallbackFn) {
+        if ((errBody.includes("unsupported_api_for_model") || errBody.includes("model_not_supported")) && fallbackFn) {
           console.log(`[proxy] Model ${body.model} doesn't support Responses API, falling back to Chat Completions`);
           fallbackFn();
           return;
@@ -549,6 +549,63 @@ function forwardResponsesPassthrough(body, res, fallbackFn) {
 
   req.write(payload);
   req.end();
+}
+
+/**
+ * Passthrough: forward Anthropic Messages API requests directly to Copilot's
+ * Anthropic-compatible endpoint. Used by Claude Code via ANTHROPIC_BASE_URL.
+ */
+function forwardAnthropicMessages(pathWithQuery, payload, reqHeaders, res) {
+  const headers = {
+    ...copilotHeaders(Buffer.byteLength(payload)),
+    Accept: reqHeaders.accept || "application/json",
+    "anthropic-version": reqHeaders["anthropic-version"] || "2023-06-01",
+  };
+
+  if (reqHeaders["anthropic-beta"]) {
+    const filtered = reqHeaders["anthropic-beta"]
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s !== "context-1m-2025-08-07")
+      .join(",");
+    if (filtered) headers["anthropic-beta"] = filtered;
+  }
+  const passthroughHeaders = [
+    "anthropic-dangerous-direct-browser-access",
+    "x-app",
+  ];
+  for (const header of passthroughHeaders) {
+    if (reqHeaders[header]) headers[header] = reqHeaders[header];
+  }
+
+  const options = {
+    hostname: apiHost,
+    port: 443,
+    path: pathWithQuery,
+    method: "POST",
+    headers,
+  };
+
+  console.log(`[proxy] Passthrough → https://${apiHost}${pathWithQuery}`);
+
+  const upstream = https.request(options, (ures) => {
+    const responseHeaders = {
+      "Content-Type": ures.headers["content-type"] || "application/json",
+    };
+    if (ures.headers["cache-control"]) responseHeaders["Cache-Control"] = ures.headers["cache-control"];
+    if (ures.headers.connection) responseHeaders.Connection = ures.headers.connection;
+    res.writeHead(ures.statusCode || 502, responseHeaders);
+    ures.pipe(res);
+  });
+
+  upstream.on("error", (err) => {
+    console.error(`[proxy] Anthropic passthrough error: ${err.message}`);
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: err.message } }));
+  });
+
+  upstream.write(payload);
+  upstream.end();
 }
 
 /**
@@ -668,6 +725,275 @@ function forwardToCopilot(chatBody, writer) {
 }
 
 // ---------------------------------------------------------------------------
+// Model name normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize Claude model names from hyphen format to dot format.
+ * e.g. claude-sonnet-4-6 → claude-sonnet-4.6
+ *      claude-opus-4-6   → claude-opus-4.6
+ *      claude-haiku-4-5  → claude-haiku-4.5
+ */
+function normalizeModelName(model) {
+  if (typeof model === "string" && model.startsWith("claude-")) {
+    return model.replace(/-(\d+)$/, ".$1");
+  }
+  return model;
+}
+
+function isClaudeModel(model) {
+  return typeof model === "string" && model.startsWith("claude");
+}
+
+// ---------------------------------------------------------------------------
+// Responses API → Anthropic Messages API translation (for Claude models)
+// ---------------------------------------------------------------------------
+
+function buildAnthropicRequest(body) {
+  const messages = [];
+  let system = undefined;
+
+  if (body.instructions) system = body.instructions;
+
+  const input = body.input;
+  if (typeof input === "string") {
+    messages.push({ role: "user", content: input });
+  } else if (Array.isArray(input)) {
+    for (const item of input) {
+      if (typeof item === "string") {
+        messages.push({ role: "user", content: item });
+        continue;
+      }
+      if (item.type === "message") {
+        // developer/system role → Anthropic system parameter
+        if (item.role === "developer" || item.role === "system") {
+          const text = Array.isArray(item.content)
+            ? item.content.map(c => c.text ?? "").join("\n")
+            : String(item.content);
+          system = system ? system + "\n" + text : text;
+          continue;
+        }
+        let content;
+        if (Array.isArray(item.content)) {
+          content = item.content.map(c => {
+            if (c.type === "input_text" || c.type === "output_text") return { type: "text", text: c.text };
+            if (c.type === "input_image") return { type: "image", source: { type: "url", url: c.image_url ?? c.url } };
+            return { type: "text", text: c.text ?? JSON.stringify(c) };
+          });
+        } else {
+          content = item.content;
+        }
+        messages.push({ role: item.role, content });
+        continue;
+      }
+      if (item.type === "function_call") {
+        messages.push({
+          role: "assistant",
+          content: [{
+            type: "tool_use",
+            id: item.call_id ?? item.id,
+            name: item.name,
+            input: JSON.parse(item.arguments || "{}"),
+          }],
+        });
+        continue;
+      }
+      if (item.type === "function_call_output") {
+        messages.push({
+          role: "user",
+          content: [{
+            type: "tool_result",
+            tool_use_id: item.call_id,
+            content: item.output,
+          }],
+        });
+        continue;
+      }
+      if (item.content) {
+        messages.push({ role: item.role ?? "user", content: item.content });
+      }
+    }
+  }
+
+  const req = {
+    model: body.model,
+    messages,
+    stream: true,
+    max_tokens: body.max_output_tokens ?? body.max_tokens ?? 16384,
+  };
+
+  if (system) req.system = system;
+  if (body.temperature != null) req.temperature = body.temperature;
+  if (body.top_p != null) req.top_p = body.top_p;
+
+  if (body.tools && body.tools.length > 0) {
+    req.tools = body.tools
+      .filter(t => t.type === "function")
+      .map(t => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      }));
+  }
+
+  return req;
+}
+
+function forwardToAnthropicCopilot(anthropicBody, writer) {
+  const payload = JSON.stringify(anthropicBody);
+
+  const headers = {
+    ...copilotHeaders(Buffer.byteLength(payload)),
+    Accept: "text/event-stream",
+    "anthropic-version": "2023-06-01",
+  };
+
+  const options = {
+    hostname: apiHost,
+    port: 443,
+    path: `${apiPathPrefix}/v1/messages`,
+    method: "POST",
+    headers,
+  };
+
+  console.log(`[proxy] Anthropic translation → https://${apiHost}${apiPathPrefix}/v1/messages (model=${anthropicBody.model})`);
+
+  const req = https.request(options, (upstream) => {
+    if (upstream.statusCode !== 200) {
+      let body = "";
+      upstream.on("data", (d) => body += d);
+      upstream.on("end", () => {
+        console.error(`[proxy] Anthropic upstream error ${upstream.statusCode}: ${body}`);
+        writer.emitError(`Anthropic upstream error ${upstream.statusCode}: ${body}`);
+      });
+      return;
+    }
+
+    writer.model = anthropicBody.model;
+    writer.emitCreated();
+
+    let textStarted = false;
+    let currentBlockType = null;
+    let currentToolUse = null;
+    let lastUsage = null;
+    let buffer = "";
+
+    upstream.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { continue; }
+
+        if (parsed.type === "message_start") {
+          if (parsed.message?.model) {
+            console.log(`[proxy] Anthropic upstream confirmed model: ${parsed.message.model}`);
+          }
+          if (parsed.message?.usage) {
+            lastUsage = {
+              prompt_tokens: parsed.message.usage.input_tokens ?? 0,
+              completion_tokens: parsed.message.usage.output_tokens ?? 0,
+            };
+          }
+        }
+
+        if (parsed.type === "content_block_start") {
+          if (parsed.content_block?.type === "text") {
+            currentBlockType = "text";
+            if (!textStarted) {
+              textStarted = true;
+              writer.emitTextStart();
+            }
+          } else if (parsed.content_block?.type === "tool_use") {
+            currentBlockType = "tool_use";
+            if (textStarted) {
+              writer.emitTextDone();
+              textStarted = false;
+            }
+            currentToolUse = {
+              id: parsed.content_block.id,
+              name: parsed.content_block.name,
+              arguments: "",
+            };
+          }
+        }
+
+        if (parsed.type === "content_block_delta") {
+          if (parsed.delta?.type === "text_delta" && parsed.delta.text) {
+            if (!textStarted) {
+              textStarted = true;
+              writer.emitTextStart();
+            }
+            writer.emitTextDelta(parsed.delta.text);
+          }
+          if (parsed.delta?.type === "input_json_delta" && currentToolUse) {
+            currentToolUse.arguments += parsed.delta.partial_json || "";
+          }
+        }
+
+        if (parsed.type === "content_block_stop") {
+          if (currentBlockType === "tool_use" && currentToolUse) {
+            writer.emitToolCallDelta({
+              index: 0,
+              id: currentToolUse.id,
+              function: {
+                name: currentToolUse.name,
+                arguments: currentToolUse.arguments,
+              },
+            });
+            writer.emitToolCallsDone();
+            currentToolUse = null;
+          }
+          currentBlockType = null;
+        }
+
+        if (parsed.type === "message_delta" && parsed.usage) {
+          lastUsage = {
+            prompt_tokens: lastUsage?.prompt_tokens ?? 0,
+            completion_tokens: parsed.usage.output_tokens ?? 0,
+          };
+        }
+
+        if (parsed.type === "message_stop") {
+          if (textStarted) {
+            writer.emitTextDone();
+            textStarted = false;
+          }
+          lastUsage = lastUsage ? {
+            ...lastUsage,
+            total_tokens: (lastUsage.prompt_tokens || 0) + (lastUsage.completion_tokens || 0),
+          } : undefined;
+          writer.emitCompleted(lastUsage);
+        }
+      }
+    });
+
+    upstream.on("end", () => {
+      if (textStarted) writer.emitTextDone();
+      if (!writer.res.writableEnded) writer.emitCompleted(lastUsage);
+    });
+
+    upstream.on("error", (err) => {
+      console.error(`[proxy] Anthropic stream error: ${err.message}`);
+      writer.emitError(err.message);
+    });
+  });
+
+  req.on("error", (err) => {
+    console.error(`[proxy] Anthropic request error: ${err.message}`);
+    writer.emitError(err.message);
+  });
+
+  req.write(payload);
+  req.end();
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -735,6 +1061,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      // Normalize Claude model names (claude-sonnet-4-6 → claude-sonnet-4.6)
+      if (parsed.model) parsed.model = normalizeModelName(parsed.model);
+
       try {
         await getSessionToken();
       } catch (err) {
@@ -745,14 +1074,60 @@ const server = http.createServer(async (req, res) => {
 
       console.log(`[proxy] ${new Date().toISOString()} POST /v1/responses model=${parsed.model}`);
 
-      // Try Responses API passthrough first; fall back to Chat Completions translation
-      const doChatFallback = () => {
+      // Claude models: skip Responses API, go directly to Anthropic Messages API
+      if (isClaudeModel(parsed.model)) {
+        console.log(`[proxy] Claude model detected, routing directly to Anthropic Messages API`);
+        const anthropicBody = buildAnthropicRequest(parsed);
+        const writer = new ResponsesStreamWriter(res);
+        forwardToAnthropicCopilot(anthropicBody, writer);
+        return;
+      }
+
+      // Other models: try Responses API passthrough first, fall back to Chat Completions
+      const doFallback = () => {
         const chatBody = buildChatRequest(parsed);
         const writer = new ResponsesStreamWriter(res);
         forwardToCopilot(chatBody, writer);
       };
 
-      forwardResponsesPassthrough(parsed, res, doChatFallback);
+      forwardResponsesPassthrough(parsed, res, doFallback);
+    });
+    return;
+  }
+
+  // Anthropic Messages API
+  if (req.method === "POST" && (req.url.startsWith("/v1/messages") || req.url.startsWith("/messages"))) {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        await getSessionToken();
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: `Token refresh failed: ${err.message}` } }));
+        return;
+      }
+
+      let model = "unknown";
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed.model) {
+          parsed.model = normalizeModelName(parsed.model);
+          model = parsed.model;
+          body = JSON.stringify(parsed);
+        }
+      } catch {
+        // Ignore malformed JSON here; upstream will return the canonical error.
+      }
+
+      const requestUrl = new URL(req.url, "http://127.0.0.1");
+      const upstreamPath =
+        requestUrl.pathname === "/messages"
+          ? `${apiPathPrefix}/v1/messages${requestUrl.search}`
+          : `${apiPathPrefix}${requestUrl.pathname}${requestUrl.search}`;
+
+      console.log(`[proxy] ${new Date().toISOString()} POST ${requestUrl.pathname} model=${model}`);
+      forwardAnthropicMessages(upstreamPath, body, req.headers, res);
     });
     return;
   }
@@ -766,5 +1141,5 @@ const port = parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "
 server.listen(port, "127.0.0.1", () => {
   console.log(`[proxy] Copilot Responses API proxy listening on http://127.0.0.1:${port}`);
   console.log(`[proxy] Forwarding to https://${apiHost}${apiPathPrefix}`);
-  console.log(`[proxy] Supports: Responses API passthrough (gpt-5.4, etc.) + Chat Completions translation (gpt-4o, etc.)`);
+  console.log(`[proxy] Supports: Responses API passthrough (gpt-5.4, etc.) + Anthropic Messages passthrough (claude-sonnet-4-6, etc.) + Chat Completions translation (gpt-4o, etc.)`);
 });
