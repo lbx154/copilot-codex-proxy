@@ -13,6 +13,12 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { installDnsFixIfEnabled } from "./dns-fix.mjs";
+
+// Opt-in workaround for sandboxed networks that hijack DNS for github.com /
+// api.github.com / api.githubcopilot.com (see dns-fix.mjs). No-op unless
+// COPILOT_PROXY_DNS_FIX=1 is set.
+installDnsFixIfEnabled();
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

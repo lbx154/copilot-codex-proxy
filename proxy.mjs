@@ -23,6 +23,12 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { installDnsFixIfEnabled } from "./dns-fix.mjs";
+
+// Opt-in workaround for sandboxed networks that hijack DNS for github.com /
+// api.github.com / api.githubcopilot.com (see dns-fix.mjs). No-op unless
+// COPILOT_PROXY_DNS_FIX=1 is set.
+installDnsFixIfEnabled();
 
 const HOME = os.homedir();
 const VSCODE_CLIENT_ID = "01ab8ac9400c4e429b23";

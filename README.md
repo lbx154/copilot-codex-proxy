@@ -240,6 +240,32 @@ node proxy.mjs --port 9090
 
 Remember to update `base_url` in Codex config and `ANTHROPIC_BASE_URL` for Claude Code accordingly.
 
+**DNS hijacked / no `sudo` to edit `/etc/hosts`**:
+
+Some sandboxed networks (corporate Kubernetes pods with cluster-managed DNS,
+locked-down notebooks, etc.) redirect `github.com` / `api.github.com` /
+`api.githubcopilot.com` to a broken internal address, causing
+`ECONNREFUSED` even though real internet egress works fine. If you can't
+write to `/etc/hosts` (read-only mount, or no `sudo`), enable the built-in
+application-level DNS override instead — no system permissions needed:
+
+```bash
+COPILOT_PROXY_DNS_FIX=1 node setup.mjs
+COPILOT_PROXY_DNS_FIX=1 node proxy.mjs
+```
+
+This is opt-in and a no-op unless the env var is set, so machines with
+working DNS are unaffected. It patches Node's `dns.lookup` for just those
+GitHub/Copilot hosts, pinning them to known-good IPs. If one of the built-in
+IPs ever goes stale, or you hit a hijacked host not covered by default,
+override/extend the map without editing code:
+
+```bash
+COPILOT_PROXY_DNS_FIX=1 \
+COPILOT_PROXY_DNS_MAP="api.github.com=140.82.113.6,github.com=140.82.114.3" \
+node proxy.mjs
+```
+
 ### Troubleshooting
 
 | Problem | Solution |
@@ -247,6 +273,7 @@ Remember to update `base_url` in Codex config and `ANTHROPIC_BASE_URL` for Claud
 | `Error: No OAuth token available` | Run `node setup.mjs` to authenticate |
 | `Error: 401 Unauthorized` | Token expired — run `node setup.mjs` again |
 | `Error: ECONNREFUSED 127.0.0.1:18080` | Proxy isn't running — start with `node proxy.mjs` |
+| `connect ECONNREFUSED 100.64.x.x:443` (or another private/internal IP) when calling `github.com`/`api.github.com` | DNS for those hosts is being hijacked (common in restricted clusters/notebooks) — see **DNS hijacked** above |
 | `Copilot access could not be verified` | Make sure you have an active GitHub Copilot subscription |
 | Proxy starts but Codex hangs | Check `~/.codex/config.toml` has the correct `base_url` and `wire_api` |
 | Claude Code returns auth errors | Check `~/.claude/settings.json` has correct `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` |
@@ -489,6 +516,28 @@ node proxy.mjs --port 9090
 
 需要相应更新 Codex 配置中的 `base_url` 和 Claude Code 的 `ANTHROPIC_BASE_URL`。
 
+**DNS 被劫持 / 没有 sudo 权限改 /etc/hosts**：
+
+一些受限网络环境（企业内部由集群统一管理 DNS 的 Kubernetes Pod、锁定的 notebook 环境等）会把
+`github.com` / `api.github.com` / `api.githubcopilot.com` 解析劫持到一个不通的内网地址，导致
+`ECONNREFUSED`，即使这台机器真实的公网出口其实是通的。如果你无法写 `/etc/hosts`（只读挂载，
+或者没有 sudo 权限），可以改用内置的应用层 DNS 覆盖 —— 完全不需要任何系统权限：
+
+```bash
+COPILOT_PROXY_DNS_FIX=1 node setup.mjs
+COPILOT_PROXY_DNS_FIX=1 node proxy.mjs
+```
+
+这个功能默认关闭、按需开启，不设置这个环境变量就完全不生效，DNS 正常的机器不受任何影响。
+它只针对 GitHub/Copilot 这几个域名，把 `dns.lookup` 的解析结果钉死在已知可用的真实 IP 上。
+如果内置的某个 IP 将来失效，或者你遇到了默认列表之外被劫持的域名，不需要改代码，直接用环境变量扩展/覆盖：
+
+```bash
+COPILOT_PROXY_DNS_FIX=1 \
+COPILOT_PROXY_DNS_MAP="api.github.com=140.82.113.6,github.com=140.82.114.3" \
+node proxy.mjs
+```
+
 ### 常见问题
 
 | 问题 | 解决方案 |
@@ -496,6 +545,7 @@ node proxy.mjs --port 9090
 | `Error: No OAuth token available` | 运行 `node setup.mjs` 进行认证 |
 | `Error: 401 Unauthorized` | 令牌已过期 —— 重新运行 `node setup.mjs` |
 | `Error: ECONNREFUSED 127.0.0.1:18080` | 代理未运行 —— 执行 `node proxy.mjs` 启动 |
+| 访问 `github.com`/`api.github.com` 时报 `connect ECONNREFUSED 100.64.x.x:443`（或其他内网/私有 IP） | 这几个域名的 DNS 被劫持了（常见于受限集群/notebook 环境）—— 参见上面的 **DNS 被劫持** 一节 |
 | `Copilot access could not be verified` | 确认你有有效的 GitHub Copilot 订阅 |
 | 代理启动但 Codex 无响应 | 检查 `~/.codex/config.toml` 中的 `base_url` 和 `wire_api` 是否正确 |
 | Claude Code 报认证错误 | 检查 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 是否正确 |
